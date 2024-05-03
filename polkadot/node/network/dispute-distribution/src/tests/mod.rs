@@ -32,7 +32,7 @@ use futures::{
 use futures_timer::Delay;
 use parity_scale_codec::{Decode, Encode};
 
-use sc_network::config::RequestResponseConfig;
+use sc_network::{config::RequestResponseConfig, ProtocolName};
 
 use polkadot_node_network_protocol::{
 	request_response::{v1::DisputeRequest, IncomingRequest, ReqProtocolNames},
@@ -57,8 +57,8 @@ use polkadot_node_subsystem_test_helpers::{
 	subsystem_test_harness, TestSubsystemContextHandle,
 };
 use polkadot_primitives::{
-	vstaging::NodeFeatures, AuthorityDiscoveryId, CandidateHash, CandidateReceipt, ExecutorParams,
-	Hash, SessionIndex, SessionInfo,
+	AuthorityDiscoveryId, Block, CandidateHash, CandidateReceipt, ExecutorParams, Hash,
+	NodeFeatures, SessionIndex, SessionInfo,
 };
 
 use self::mock::{
@@ -832,7 +832,7 @@ async fn check_sent_requests(
 			if confirm_receive {
 				for req in reqs {
 					req.pending_response.send(
-						Ok(DisputeResponse::Confirmed.encode())
+						Ok((DisputeResponse::Confirmed.encode(), ProtocolName::from("")))
 					)
 					.expect("Subsystem should be listening for a response.");
 				}
@@ -879,7 +879,10 @@ where
 
 	let genesis_hash = Hash::repeat_byte(0xff);
 	let req_protocol_names = ReqProtocolNames::new(&genesis_hash, None);
-	let (req_receiver, req_cfg) = IncomingRequest::get_config_receiver(&req_protocol_names);
+	let (req_receiver, req_cfg) = IncomingRequest::get_config_receiver::<
+		Block,
+		sc_network::NetworkWorker<Block, Hash>,
+	>(&req_protocol_names);
 	let subsystem = DisputeDistributionSubsystem::new(
 		keystore,
 		req_receiver,

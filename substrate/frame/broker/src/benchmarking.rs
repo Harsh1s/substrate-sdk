@@ -885,6 +885,17 @@ mod benches {
 			T::Coretime::request_revenue_info_at(rc_block);
 		}
 	}
+	#[benchmark]
+	fn notify_core_count() -> Result<(), BenchmarkError> {
+		let admin_origin =
+			T::AdminOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+
+		#[extrinsic_call]
+		_(admin_origin as T::RuntimeOrigin, 100);
+
+		assert!(CoreCountInbox::<T>::take().is_some());
+		Ok(())
+	}
 
 	#[benchmark]
 	fn do_tick_base() -> Result<(), BenchmarkError> {
@@ -903,6 +914,23 @@ mod benches {
 
 		let updated_status = Status::<T>::get().unwrap();
 		assert_eq!(status, updated_status);
+
+		Ok(())
+	}
+
+	#[benchmark]
+	fn swap_leases() -> Result<(), BenchmarkError> {
+		let admin_origin =
+			T::AdminOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+
+		// Add two leases in `Leases`
+		let n = (T::MaxLeasedCores::get() / 2) as usize;
+		let mut leases = vec![LeaseRecordItem { task: 1, until: 10u32.into() }; n];
+		leases.extend(vec![LeaseRecordItem { task: 2, until: 20u32.into() }; n]);
+		Leases::<T>::put(BoundedVec::try_from(leases).unwrap());
+
+		#[extrinsic_call]
+		_(admin_origin as T::RuntimeOrigin, 1, 2);
 
 		Ok(())
 	}

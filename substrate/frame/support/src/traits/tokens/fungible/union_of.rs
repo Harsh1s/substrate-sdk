@@ -17,6 +17,8 @@
 
 //! Types to combine some `fungible::*` and `fungibles::*` implementations into one union
 //! `fungibles::*` implementation.
+//!
+//! See the [`crate::traits::fungible`] doc for more information about fungible traits.
 
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::traits::{
@@ -727,21 +729,22 @@ impl<
 	fn pair(
 		asset: Self::AssetId,
 		amount: Self::Balance,
-	) -> (fungibles::Debt<AccountId, Self>, fungibles::Credit<AccountId, Self>) {
+	) -> Result<(fungibles::Debt<AccountId, Self>, fungibles::Credit<AccountId, Self>), DispatchError>
+	{
 		match Criterion::convert(asset.clone()) {
 			Left(()) => {
-				let (a, b) = <Left as fungible::Balanced<AccountId>>::pair(amount);
-				(
+				let (a, b) = <Left as fungible::Balanced<AccountId>>::pair(amount)?;
+				Ok((
 					fungibles::imbalance::from_fungible(a, asset.clone()),
 					fungibles::imbalance::from_fungible(b, asset),
-				)
+				))
 			},
 			Right(a) => {
-				let (a, b) = <Right as fungibles::Balanced<AccountId>>::pair(a, amount);
-				(
+				let (a, b) = <Right as fungibles::Balanced<AccountId>>::pair(a, amount)?;
+				Ok((
 					fungibles::imbalance::from_fungibles(a, asset.clone()),
 					fungibles::imbalance::from_fungibles(b, asset),
-				)
+				))
 			},
 		}
 	}

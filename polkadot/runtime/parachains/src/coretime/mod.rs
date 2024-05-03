@@ -26,9 +26,7 @@ pub use pallet::*;
 use pallet_broker::{CoreAssignment, CoreIndex as BrokerCoreIndex};
 use primitives::{CoreIndex, Id as ParaId};
 use sp_arithmetic::traits::SaturatedConversion;
-use xcm::v3::{
-	send_xcm, Instruction, Junction, Junctions, MultiLocation, OriginKind, SendXcm, Xcm,
-};
+use xcm::v4::{send_xcm, Instruction, Junction, Location, OriginKind, SendXcm, WeightLimit, Xcm};
 
 use crate::{
 	assigner_coretime::{self, PartsOf57600},
@@ -85,6 +83,8 @@ enum CoretimeCalls {
 	SetLease(pallet_broker::TaskId, pallet_broker::Timeslice),
 	#[codec(index = 19)]
 	NotifyCoreCount(u16),
+	#[codec(index = 99)]
+	SwapLeases(ParaId, ParaId),
 }
 
 #[frame_support::pallet]
@@ -216,22 +216,41 @@ impl<T: Config> Pallet<T> {
 	}
 
 	pub fn initializer_on_new_session(notification: &SessionChangeNotification<BlockNumberFor<T>>) {
-		let old_core_count = notification.prev_config.coretime_cores;
-		let new_core_count = notification.new_config.coretime_cores;
+		let old_core_count = notification.prev_config.scheduler_params.num_cores;
+		let new_core_count = notification.new_config.scheduler_params.num_cores;
 		if new_core_count != old_core_count {
 			let core_count: u16 = new_core_count.saturated_into();
-			let message = Xcm(vec![mk_coretime_call(
-				crate::coretime::CoretimeCalls::NotifyCoreCount(core_count),
-			)]);
-			if let Err(err) = send_xcm::<T::SendXcm>(
-				MultiLocation {
-					parents: 0,
-					interior: Junctions::X1(Junction::Parachain(T::BrokerId::get())),
+			let message = Xcm(vec![
+				Instruction::UnpaidExecution {
+					weight_limit: WeightLimit::Unlimited,
+					check_origin: None,
 				},
+				mk_coretime_call(crate::coretime::CoretimeCalls::NotifyCoreCount(core_count)),
+			]);
+			if let Err(err) = send_xcm::<T::SendXcm>(
+				Location::new(0, [Junction::Parachain(T::BrokerId::get())]),
 				message,
 			) {
 				log::error!("Sending `NotifyCoreCount` to coretime chain failed: {:?}", err);
 			}
+		}
+	}
+
+	// Handle legacy swaps in coretime. Notifies broker parachain that a lease swap has occurred via
+	// XCM message. This function is meant to be used in an implementation of `OnSwap` trait.
+	pub fn on_legacy_lease_swap(one: ParaId, other: ParaId) {
+		let message = Xcm(vec![
+			Instruction::UnpaidExecution {
+				weight_limit: WeightLimit::Unlimited,
+				check_origin: None,
+			},
+			mk_coretime_call(crate::coretime::CoretimeCalls::SwapLeases(one, other)),
+		]);
+		if let Err(err) = send_xcm::<T::SendXcm>(
+			Location::new(0, [Junction::Parachain(T::BrokerId::get())]),
+			message,
+		) {
+			log::error!("Sending `SwapLeases` to coretime chain failed: {:?}", err);
 		}
 	}
 }
@@ -245,7 +264,9 @@ impl<T: Config> OnNewSession<BlockNumberFor<T>> for Pallet<T> {
 fn mk_coretime_call(call: crate::coretime::CoretimeCalls) -> Instruction<()> {
 	Instruction::Transact {
 		origin_kind: OriginKind::Superuser,
-		require_weight_at_most: Weight::from_parts(1000000000, 200000),
+		// Largest call is set_lease with 1526 byte:
+		// Longest call is reserve() with 31_000_000
+		require_weight_at_most: Weight::from_parts(170_000_000, 20_000),
 		call: BrokerRuntimePallets::Broker(call).encode().into(),
 	}
 }

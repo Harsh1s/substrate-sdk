@@ -114,7 +114,6 @@ pub mod pallet {
 	///
 	/// It is illegal for a `None` value to trail in the list.
 	#[pallet::storage]
-	#[pallet::getter(fn lease)]
 	pub type Leases<T: Config> =
 		StorageMap<_, Twox64Concat, ParaId, Vec<Option<(T::AccountId, BalanceOf<T>)>>, ValueQuery>;
 
@@ -326,18 +325,6 @@ impl<T: Config> Pallet<T> {
 
 		tracker.into_iter().collect()
 	}
-
-	/// Current lease index and how many blocks we are already in.
-	pub fn lease_period_index_plus_progress(
-		b: BlockNumberFor<T>,
-	) -> Option<(<Self as Leaser<BlockNumberFor<T>>>::LeasePeriod, BlockNumberFor<T>)> {
-		// Note that blocks before `LeaseOffset` do not count as any lease period.
-		let offset_block_now = b.checked_sub(&T::LeaseOffset::get())?;
-		let lease_period = offset_block_now / T::LeasePeriod::get();
-		let in_lease = offset_block_now % T::LeasePeriod::get();
-
-		Some((lease_period, in_lease))
-	}
 }
 
 impl<T: Config> crate::traits::OnSwap for Pallet<T> {
@@ -461,8 +448,12 @@ impl<T: Config> Leaser<BlockNumberFor<T>> for Pallet<T> {
 	}
 
 	fn lease_period_index(b: BlockNumberFor<T>) -> Option<(Self::LeasePeriod, bool)> {
-		Self::lease_period_index_plus_progress(b)
-			.map(|(period, progress)| (period, progress.is_zero()))
+		// Note that blocks before `LeaseOffset` do not count as any lease period.
+		let offset_block_now = b.checked_sub(&T::LeaseOffset::get())?;
+		let lease_period = offset_block_now / T::LeasePeriod::get();
+		let at_begin = (offset_block_now % T::LeasePeriod::get()).is_zero();
+
+		Some((lease_period, at_begin))
 	}
 
 	fn already_leased(
@@ -528,9 +519,9 @@ mod tests {
 	frame_support::construct_runtime!(
 		pub enum Test
 		{
-			System: frame_system::{Pallet, Call, Config<T>, Storage, Event<T>},
-			Balances: pallet_balances::{Pallet, Call, Storage, Config<T>, Event<T>},
-			Slots: slots::{Pallet, Call, Storage, Event<T>},
+			System: frame_system,
+			Balances: pallet_balances,
+			Slots: slots,
 		}
 	);
 
@@ -538,7 +529,7 @@ mod tests {
 		pub const BlockHashCount: u32 = 250;
 	}
 
-	#[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
+	#[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 	impl frame_system::Config for Test {
 		type BaseCallFilter = frame_support::traits::Everything;
 		type BlockWeights = ();
@@ -582,7 +573,6 @@ mod tests {
 		type RuntimeHoldReason = RuntimeHoldReason;
 		type RuntimeFreezeReason = RuntimeFreezeReason;
 		type FreezeIdentifier = ();
-		type MaxHolds = ConstU32<1>;
 		type MaxFreezes = ConstU32<1>;
 	}
 
